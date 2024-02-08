@@ -17,54 +17,43 @@ from lib import checkInputFile
 #     サーバは、レスポンスプロトコルを用いて応答します。これは、ステータス情報を含む 16 バイトのメッセージです。
 
 
-
-
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
 # サーバが待ち受けているポートにソケットを接続します
-server_address = "0.0.0.0"
+server_address = "localhost"
 server_port = 9001
 
-print('connecting to {}'.format(server_address, server_port))
+print("connecting to {}".format(server_address, server_port))
 
 try:
-    # 接続後、サーバとクライアントが相互に読み書きができるようになります 
+    # 接続後、サーバとクライアントが相互に読み書きができるようになります
     sock.connect((server_address, server_port))
 except socket.error as err:
     print(err)
     sys.exit(1)
 
 try:
-    filepath = input('Type in a file to upload: ')
+    filepath = input("Type in a file to upload: ")
     # ファイルを送信する場合は、mp4ファイルで4GB以下に制限
-    checkFileResult=checkInputFile(filepath)
+    checkFileResult = checkInputFile(filepath)
 
-
-    
-    if checkInputFile==False:
+    if checkInputFile == False:
         raise Exception("File Error")
-    
 
     # バイナリモードでファイルを読み込む
-    with open(filepath, 'rb') as f:
-        
-
-
-        filename = os.path.basename(f.name)
-
-        # ファイル名からビット数
-        filename_bits = filename.encode('utf-8')
+    with open(filepath, "rb") as f:
 
         # ファイルサイズを取得（バイト単位）
         file_size = os.path.getsize(filepath)
 
-        header = file_size.to_bytes(8,"big")
+        header = file_size.to_bytes(4, byteorder="big")
 
         # ヘッダの送信
         sock.send(header)
 
-        # # ファイル名の送信
-        # sock.send(filename_bits)
+        # ファイル名の送信
+        filename = os.path.basename(f.name)
+        sock.send(filename.encode())
 
         data = f.read(1400)
         while data:
@@ -73,5 +62,5 @@ try:
             data = f.read(1400)
 
 finally:
-    print('closing socket')
+    print("closing socket")
     sock.close()
