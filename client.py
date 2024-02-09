@@ -1,21 +1,14 @@
 import socket
 import sys
 import os
+import json
 
 from lib import checkInputFile
 
-
-# クライアントがサーバに接続し、mp4 ファイルをアップロードするためのサービスを開発します。サーバはバックグラウンドで動作し、クライアントは CLI を通じてサーバに接続します。クライアントが CLI でコマンドを実行すると、アップロードするファイルが選択されます。ファイルのアップロードが完了したら、サーバから状態を報告するメッセージがクライアントに送られます。
-
-# 機能要件
-
-#     サーバは CLI で起動し、バックグラウンドで着信接続を待機します。サーバが停止していると、それはサービスが停止しているという意味です。
-#     クライアントは TCP を使用してサーバにファイルを送信する必要があります。TCP は UDP よりもオーバーヘッドが大きいですが、確実にファイル全体が送信されることを保証するためです。
-#     TCP での送信では、比較的安定したパケットサイズを使ってください。TCP プロトコルに基づいて、パケットの上限サイズは 65535 バイト（16 ビット長）である可能性がありますが、通常の最大セグメントサイズは下位ネットワークレベルで 1460 バイトです。すべてのデータが送信されるまで、最大サイズとして 1400 バイトのパケットを使用してください。
-#     接続プロトコルは基本的なものです。最初にサーバに送信される 32 バイトは、ファイルのバイト数をサーバに通知します。このプロトコルは最大で 4GB（232バイト）までのファイルに対応しています。
-#     サーバは、受け取ったデータバイトを常に mp4 ファイルとして解釈します。他のファイル形式はサポートされていませんので、クライアントは送信するファイルが mp4 であることを確認する必要があります。
-#     サーバは、レスポンスプロトコルを用いて応答します。これは、ステータス情報を含む 16 バイトのメッセージです。
-
+# MMP プロトコル関連の定数
+JSON_SIZE_BYTES = 16
+PAYLOAD_SIZE_BYTES = 47
+HEADER_SIZE = JSON_SIZE_BYTES + PAYLOAD_SIZE_BYTES
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
@@ -23,7 +16,7 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server_address = "localhost"
 server_port = 9001
 
-print("connecting to {}".format(server_address, server_port))
+print("connecting to {}:{}".format(server_address, server_port))
 
 try:
     # 接続後、サーバとクライアントが相互に読み書きができるようになります
@@ -33,28 +26,74 @@ except socket.error as err:
     sys.exit(1)
 
 try:
-    filepath = input("Type in a file to upload: ")
+    file_path = input("Type in a file to upload: ")
     # ファイルを送信する場合は、mp4ファイルで4GB以下に制限
-    checkFileResult = checkInputFile(filepath)
+    checkFileResult = checkInputFile(file_path)
 
-    if checkInputFile == False:
+    if not checkFileResult:
         raise Exception("File Error")
 
+    # 動画ファイルをアップロード
+    media_type = "mp4"  # 送信するメディアの種類
+    mode = input(
+        "何してほしいか。1:圧縮 2:解像度変更 3:アスペクト変更 4:音声変換 5:GIF作成 "
+    )
+    print("mode", mode)
+
+    json_data = {"file_path": file_path, "media_type": media_type, "mode": mode}
+
+    if mode == "2":
+        # 解像度変更の場合、解像度を入力して送信
+        resolution = input("解像度を入力してください (例: '640:360'): ")
+        json_data["resolution"] = resolution
+    elif mode == "3":
+        # アスペクト比変更の場合、アスペクト比を入力して送信
+        aspect_ratio = input("アスペクト比を入力してください (例: '16:9'): ")
+        json_data["aspect_ratio"] = aspect_ratio
+    elif mode == "5":
+        # GIF作成の場合、フォーマット、開始時間、終了時間を入力して送信
+        format = input("フォーマットを選択してください (gif または webm): ")
+        json_data["format"] = format
+
+        start_time = input("開始時間を入力してください (例: '00:00:10'): ")
+        json_data["start_time"] = start_time
+
+        end_time = input("終了時間を入力してください (例: '00:00:20'): ")
+        json_data["end_time"] = end_time
+    elif mode == "1" or mode == "4":
+        pass
+    else:
+        print("無効なモードです")
+        raise Exception("Invalid mode was selected")
+
     # バイナリモードでファイルを読み込む
-    with open(filepath, "rb") as f:
-
-        # ファイルサイズを取得（バイト単位）
-        file_size = os.path.getsize(filepath)
-
-        header = file_size.to_bytes(4, byteorder="big")
-
-        # ヘッダの送信
-        sock.send(header)
-
-        # ファイル名の送信
+    with open(file_path, "rb") as f:
+        # ファイル名をペイロードに
         filename = os.path.basename(f.name)
-        sock.send(filename.encode())
+        json_data["file_name"] = filename
 
+        # JSON サイズ、メディアタイプ、ペイロードサイズを計算
+        json_payload = json.dumps(json_data)
+        json_payload_bytes = json_payload.encode("ISO-8859-1")
+
+        json_size = len(json_payload_bytes)
+        media_type = json_data["media_type"]
+        payload_size = os.path.getsize(json_data["file_path"])
+        print("json_string", json_payload)
+
+        # ヘッダを作成
+        header = json_size.to_bytes(JSON_SIZE_BYTES, byteorder="big")
+        header += media_type.encode("utf-8")
+        header += payload_size.to_bytes(PAYLOAD_SIZE_BYTES, byteorder="big")
+
+        # ヘッダとペイロードを送信
+        sock.sendall(header)
+
+        # JSONデータを送信
+        print("send_jsondata", json_payload_bytes)
+        sock.send(json_payload_bytes)
+
+        # ファイルを送信
         data = f.read(1400)
         while data:
             print("Sending...")
