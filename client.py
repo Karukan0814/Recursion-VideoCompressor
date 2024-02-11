@@ -136,15 +136,25 @@ def ask_server(file_id: str):
     try:
         while True:
             # ここでサーバに処理状態を問い合わせるリクエストを送る
-            sock.sendall("status".encode())  # 状態確認用のキーワードを送信
+            sock.sendall(file_id.encode())
             status = sock.recv(1024).decode()  # サーバからのレスポンスを受け取る
             print("status", status)
-            if status == "completed":
-                print("Processing completed.")
+            if status == 2:
+                # output_path = sock.recv(
+                #     1024
+                # ).decode()  # サーバからのレスポンスを受け取る
+
+                # print(output_path)
+                print("done!")
                 break
+            elif status == 999:
+                print("該当のファイルは存在しません")
+                break
+
             else:
                 print("Processing... Waiting another minute.")
                 time.sleep(60)  # 60秒待つ
+                continue
 
     except Exception as e:
         print(f"Error: {e}")

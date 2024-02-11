@@ -4,7 +4,6 @@ import json
 import threading
 import time
 
-
 from pathlib import Path
 from lib import (
     compress_video,
@@ -15,6 +14,15 @@ from lib import (
 )
 
 
+# このステージでは、ユーザーが動画ファイルをサーバにアップロードし、そのファイルに対して動画処理ができるサービスを開発します。処理が完了した動画ファイルはサーバからユーザーに返されます。サーバとクライアントは、TCP とカスタムアプリケーションレベルプロトコルを使って、さまざまな種類のファイルを互いに送信できるようにします。以下に、このサービスで提供される動画処理機能の一覧があります。
+
+
+# 動画を圧縮する: ユーザーは動画ファイルをサーバにアップロードし、圧縮されたバージョンをダウンロードできます。サーバが自動的に最適な圧縮を選択します。
+# 動画の解像度を変更する: ユーザーが動画をアップロードして希望する解像度を選択すると、その解像度に変更された動画がダウンロードできます。
+# 動画のアスペクト比を変更する: ユーザーが動画をアップロードして希望するアスペクト比を選ぶと、そのアスペクト比に変更された動画がダウンロードできます。
+# 動画を音声に変換する: 動画ファイルをアップロードすると、その動画から音声だけを抽出した MP3 バージョンがダウンロードできます。
+# 指定した時間範囲で GIF や WEBM を作成: ユーザーが動画をアップロードし、時間範囲を指定すると、その部分を切り取って GIF または WEBM フォーマットに変換します。
+# すべての動画処理は FFMPEG を使って行います。
 # 受け付けたファイルの情報を保存するクラス
 class File:
     def __init__(self, file_id: str, input_path: str, output_path: str, state=0):
@@ -28,7 +36,7 @@ class File:
 file_map: {str: File} = {}
 
 
-def accept_file():
+def receive_request():
 
     # まず、必要なモジュールをインポートし、ソケットオブジェクトを作成して、アドレスファミリ（AF_INET）とソケットタイプ（SOCK_STREAM）を指定します。サーバのアドレスは、任意のIPアドレスからの接続を受け入れるアドレスである0.0.0.0に設定し、サーバのポートは9001に設定されています。
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -73,7 +81,6 @@ def accept_file():
             print("json_size", json_size)
 
             # JSONデータを受信
-
             data = b""
             while len(data) < json_size + 2:
                 packet = connection.recv(json_size + 2 - len(data))
@@ -82,11 +89,14 @@ def accept_file():
                 data += packet
 
             # data = connection.recv(json_size + 2)
+            print("data", data)
             # バイト文字列をデコードしてUnicode文字列に変換
             unicode_string = data.decode("ISO-8859-1")
+            print("unicode_string", unicode_string)
 
             # 'u\xd0' を削除して、残りの部分を取得
             cleaned_string = unicode_string.replace("u\xd0", "")
+            print("cleaned_string", cleaned_string)
 
             json_payload = json.loads(cleaned_string)
 
@@ -99,6 +109,23 @@ def accept_file():
 
             stream_rate = 1400
 
+            # ファイルIDを作成し、ファイルリストマップに入れる
+            # # ファイル名＋タイムスタンプ→intで一意なfile_idを作成する
+            # # 現在のタイムスタンプを取得
+            timestamp = str(time.time())
+            # # ファイル名とタイムスタンプを結合
+            file_id = file_name + timestamp
+            print("file_id", file_id)
+
+            # 生成したファイルIDをクライアント側に送る
+            connection.sendall(file_id.encode())
+
+            # # ファイルリストに入れる
+            file_info = File(file_id, "", "")
+            file_map[file_id] = file_info
+
+            print("filemap", file_map)
+
             # ファイルを書き込む準備
             with open(os.path.join(input_path, file_name), "wb") as file:
                 # ファイルの内容を受信し、ファイルに書き込む
@@ -110,21 +137,14 @@ def accept_file():
                         break
                     file.write(data)
                     received_bytes += len(data)
-                    print("received_bytes", received_bytes)
-
-            # # ファイル名＋タイムスタンプ→intで一意なfile_idを作成する
-            # # 現在のタイムスタンプを取得
-            # timestamp = str(time.time())
-            # # ファイル名とタイムスタンプを結合
-            # file_id = file_name + timestamp
-
-            # # ファイルリストに入れる
-            # file_info = File(file_id, input_path + file_name, "")
-            # file_map[file_id] = file_info
-
-            # print("filemap", file_map)
+                    # print("received_bytes", received_bytes)
 
             print("Finished downloading the file from client.")
+
+            # クライアントからのinputファイルの保存パスを格納
+            file_map[file_id].input_path = input_path + file_name
+            file_map[file_id].state = 1
+            print("state", file_map[file_id].state)
 
             # 以下、モードごとにinputfileを加工する
             output_file_path = ""
@@ -147,9 +167,13 @@ def accept_file():
                     file_name, start_time, end_time, format
                 )
             print("output_file_path", output_file_path)
+
+            # 加工後のファイルの保存パスを格納
+            file_map[file_id].output_path = output_file_path
+
             # 加工処理が終わったらファイルリストの該当ファイルの状態を変更
-            # file_map[file_id].state = 2
-            # print("filemap", file_map)
+            file_map[file_id].state = 2
+            print("state", file_map[file_id].state)
 
         except Exception as e:
             print("Error: " + str(e))
@@ -180,49 +204,57 @@ def respond_file_state():
         try:
             print("connection from", client_address)
             # クライアントが確認したいファイルのIDを取り出す
-            file_id = connection.recv(1024)
+            file_id_byte = connection.recv(1024)
+            file_id = file_id_byte.decode()
+            print("check file_id", file_id)
 
             # 処理中のファイルリストから該当のファイルを取り出す
-            if int(file_id.decode("utf-8")) in file_map:
+            if file_id in file_map:
 
-                file_Info = file_map[int(file_id.decode("utf-8"))]
+                file_Info = file_map[file_id]
                 state = file_Info.state
                 print("file_id", file_id)
                 print("state", state)
 
-                if state == "1" or state == "0":
-                    sock.sendall("処理中".encode("utf-8"))
-                elif state == "2":
-                    sock.sendall("完了".encode("utf-8"))
+                if state == 0 or state == 1:
+                    connection.sendall(state.to_bytes(1, "big"))
+
+                elif state == 2:
+                    connection.sendall(state.to_bytes(1, "big"))
+
                     output_path = file_Info.output_path
-                    sock.sendall(output_path.encode("utf-8"))
+                    connection.sendall(output_path.encode("utf-8"))
 
                     # 処理中ファイルリストから削除する
                     removed_file = file_map.pop(file_id, None)
                     print(removed_file.file_id + "を処理が正常終了したため削除しました")
+
                 else:
-                    sock.sendall("異常終了".encode("utf-8"))
+                    # 不正な値が入っているため処理中ファイルリストから削除する
+                    removed_file = file_map.pop(file_id, None)
+                    connection.sendall("異常終了".encode("utf-8"))
 
             else:
-                sock.sendall("No file".encode("utf-8"))
+                # 該当のファイルがない場合
+                state = 999
+                connection.sendall(state.to_bytes(1, "big"))
 
         except Exception as e:
             print("Error: " + str(e))
 
         finally:
             print("Closing current connection")
-            connection.close()
 
 
 def main():
     # 新規のファイル加工を受け付けるスレッド
-    accept_file_thread = threading.Thread(target=accept_file)
+    receive_request_thread = threading.Thread(target=receive_request)
 
     # 加工が終わったファイルの情報をクライアント側に投げるスレッド
     respond_thread = threading.Thread(target=respond_file_state)
 
     # スレッドを開始
-    accept_file_thread.start()
+    receive_request_thread.start()
     respond_thread.start()
 
 
